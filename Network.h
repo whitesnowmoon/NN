@@ -9,6 +9,9 @@
 #include<thread>
 #include<queue>
 #include<atomic>
+#include<fstream>
+#include<string>
+#include<list>
 #ifdef OPEN_THREAD
 static std::mutex update_mutex;
 class Task
@@ -94,6 +97,11 @@ double sigmoid(double x) {
 double ss_back(double x) {
 	return (1 - x) * x;
 }
+
+
+
+
+
 template<typename Type_ = double>
 class Layer;
 template<typename Type_=double>
@@ -298,7 +306,7 @@ public:
 		{
 			for (int j = 0; j < t.Matrix_column; j++)
 			{
-				out << std::fixed << std::setprecision(4) << t.Matrix_data[i][j] << " ";
+				out << std::fixed << std::setprecision(5) << t.Matrix_data[i][j] << " ";
 			}
 			out << std::endl;
 		}
@@ -366,7 +374,6 @@ public:
 				double t = (this->output.Matrix_data[i][j] - goal.Matrix_data[i][j]);
 				this->e.Matrix_data[i][j] = t;
 				this->e_sum += fabs(t);
-
 			}
 		}
 	}
@@ -383,10 +390,10 @@ public:
 	Matrix<Type_> input;
 	Matrix<Type_> output;
 	Matrix<Type_> e;
+	Matrix<Type_> w;
 	double v = 0.9;
 	double e_sum=0;
 private:
-	Matrix<Type_> w;
 	Matrix<Type_> ss;
 };
 
@@ -441,9 +448,96 @@ public:
 		}
 		return net_layers[net_layers.size() - 1].e;
 	}
-
+	double get_e(Matrix<Type_>& goal) {
+		net_layers[net_layers.size() - 1].get_e(goal);
+		return net_layers[net_layers.size() - 1].e_sum;
+			
+	}
+	void print() {
+		for (unsigned int i = 0; i < net_layers.size(); i++)
+		{
+			std::cout << "layer:" << (i + 1) <<std::endl;
+			std::cout << net_layers[i].w;
+		}
+	}
 };
 
+
+template<typename Type_ = double>
+class Text
+{
+public:
+	std::list<std::string> str_list;
+	Text() {
+
+	}
+	Text(const char* filename, int mode=(std::ios::binary| std::ios::in | std::ios::out),int access=64) {
+		file.open(filename,mode,access);
+		if (file.is_open()) {
+			while (!file.eof()) {
+				std::string str;
+				std::getline(file, str);
+				if (str.size() != 0) {
+					str.pop_back();
+					str_list.push_back(str);
+				}
+			}
+		}
+	}
+	~Text() {
+		if (file.is_open())
+			file.close();
+	}
+
+	static std::vector<Type_> unicode(std::string strValue) {
+		std::vector<Type_> ret;
+		const char* ptr_ = strValue.c_str();
+		int str_size = strValue.size();
+		unsigned char to_change; bool bit = 0;
+		while (str_size > 0)
+		{
+			to_change = *ptr_;
+			unsigned int invec = 0;
+			unsigned char c_num = 0;
+			for (unsigned char i = 0; i < 8; i++) {
+				bit = (to_change << i) & 0x80;
+				if (bit)c_num++;
+				else break;
+			}
+			const char* ptr_back = ptr_;
+			to_change = *ptr_back;
+			for (unsigned char i = c_num+1; i < 8; i++) {
+				bit = (to_change << i) & 0x80;
+				invec = (invec << 1);
+				if (bit)
+					invec = invec + 1;
+			}
+			ptr_back++;
+			for (unsigned char i = 0; i < c_num-1; i++) {
+				to_change = *ptr_back;
+				for (unsigned char i = 2; i < 8; i++) {
+					bit = (to_change << i) & 0x80;
+					invec = (invec << 1);
+					if(bit)
+					invec = invec+1;
+				}
+				ptr_back++;
+			}
+			double in_v;
+			if(invec< 0x9FA5&& invec>0x4E00)
+				in_v = ((double)invec - 0x4E00)/(0x9FA5- 0x4E00);
+			else {
+				in_v = (double)invec / 0x10FFFFF;
+			}
+			ret.emplace_back(in_v);
+			ptr_ += c_num;
+			str_size-= c_num;
+		}
+		return ret;
+	}
+private:
+	std::fstream file;
+};
 
 #endif 
 
