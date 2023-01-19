@@ -230,6 +230,7 @@ public:
 				for (int ti = 0; ti < this->Matrix_column; ti++)
 				{
 					in += this->Matrix_data[i][ti] * mutipul.Matrix_data[ti][j];
+					//std::cout << this->Matrix_data[i][ti] << "*" << mutipul.Matrix_data[ti][j] << "\n";
 				}
 				putn.Matrix_data[i][j] = in;
 			}

@@ -7,11 +7,14 @@
 #include<ostream>
 #include<iomanip>
 #include<vector>
+#include<thread>
+#include<mutex>
+#include<condition_variable>
 
 double sigmoid(double x) {
 	double out=1/(1+exp(-x));
 	if (out < 1.0e-8) {
-		std::cout << "梯度消失置0\n";
+		std::cout << "梯度消失置0\Matrix_data";
 		return 0;
 	}
 	return out;
@@ -21,17 +24,17 @@ double ss_back(double x) {
 	return (1 - x) * x;
 }
 
-
-class net
+std::mutex m;
+class Matrix
 {
 public:
-	net(){
+	Matrix(){
 		this->r = 0;
 		this->c = 0;
 		this->n = nullptr;
 		//std::cout << this << "0  default\n";
 	}
-	explicit net(int r, int c) {
+	explicit Matrix(int r, int c) {
  		this->r = r;
 		this->c = c;
 		n = new double* [r];
@@ -48,7 +51,7 @@ public:
 		}
 		//std::cout << this <<"num default\n";
 	};
-	net(const net& old):r(old.r),c(old.c),n(new double* [old.r]) {
+	Matrix(const Matrix& old):r(old.r),c(old.c),n(new double* [old.r]) {
 		for (int i = 0; i < this->r; i++)
 		{
 			this->n[i] = new double[this->c];
@@ -56,11 +59,11 @@ public:
 		}
 		//std::cout << this <<"copy\n";
 	}//实质const net&=net&&底层，但net&&引用的地址在代码中没有对应变量(临时)，但const net是有的
-	net(net&& old) :r(old.r), c(old.c), n(old.n) {
+	Matrix(Matrix&& old) :r(old.r), c(old.c), n(old.n) {
 		old.n = nullptr;
 		//std::cout<<this << "move\n";
 	}
-	~net() {
+	~Matrix() {
 		//std::cout << "delete" << this << std::endl;
 		if (n != nullptr) {
 			for (int i = 0; i < r; i++)
@@ -85,14 +88,32 @@ public:
 			printf("\n");
 		}
 	}
-	net& operator=(net&& old) {
+	Matrix& operator=(Matrix&& old) {
 		this->c = old.c;
+		if (this->n != nullptr) {
+			for (int i = 0; i < r; i++)
+			{
+					delete this->n[i];
+					this->n[i] = nullptr;
+			}
+			delete n;
+			this->n = nullptr;
+		}
 		this->n = old.n;
 		this->r = old.r;
 		old.n = nullptr;
 		return *this;
 	}
-	net& operator=(const net& old) {
+	Matrix& operator=(const Matrix& old) {
+		if (this->n != nullptr) {
+			for (int i = 0; i < this->r; i++)
+			{
+				delete this->n[i];
+				this->n[i] = nullptr;
+			}
+			delete n;
+			this->n = nullptr;
+		}
 		this->c = old.c;
 		this->r = old.r;
 		this->n = new double* [this->r];
@@ -103,9 +124,9 @@ public:
 		}
 		return *this;
 	}
-	net operator*(net& mutipul) {
+	Matrix operator*(Matrix& mutipul) {
 
-		net putn(this->r,mutipul.c);
+		Matrix putn(this->r,mutipul.c);
 		for (int i = 0; i < this->r; i++)
 		{
 			for (int j = 0; j < mutipul.c; j++)
@@ -120,8 +141,8 @@ public:
 		}
 		return putn;
 	}
-	net operator-(net& sub) {
-		net putn(sub.r, sub.c);
+	Matrix operator-(Matrix& sub) {
+		Matrix putn(sub.r, sub.c);
 		for (int i = 0; i < sub.r; i++)
 		{
 			for (int j = 0; j < sub.c; j++)
@@ -131,8 +152,8 @@ public:
 		}
 		return putn;
 	}
-	net operator+(net& add) {
-		net putn(add.r, add.c);
+	Matrix operator+(Matrix& add) {
+		Matrix putn(add.r, add.c);
 		for (int i = 0; i < add.r; i++)
 		{
 			for (int j = 0; j < add.c; j++)
@@ -174,7 +195,7 @@ public:
 		int t = c;
 		c = r; r = t;
 	}
-	friend std::ostream& operator<<(std::ostream& out, const net& t) {
+	friend std::ostream& operator<<(std::ostream& out, const Matrix& t) {
 		//out.precision(4);
 		for (int i = 0; i < t.r; i++)
 		{
@@ -206,16 +227,17 @@ public:
 class layer
 {
 public:
-	net w;
-	net input;
-	net output;
-	net e;
-	net ss;
+	
+	Matrix w;
+	Matrix input;
+	Matrix output;
+	Matrix e;
+	Matrix ss;
 	double v=0.9;
 	layer(int r, int c):w(r,c), input(c,1),output(r,1),e(r,1),ss(r,1){
 
 	}
-	net oput(net& input) {
+	Matrix oput(Matrix& input) {
 		this->input = input;
 		this->output = w * input;
 		this->output.fun_handle(sigmoid);
@@ -224,6 +246,8 @@ public:
 		return this->output;
 	}
 	void updata() {
+		
+		std::unique_lock<std::mutex> graud(m);
 		for (int i = 0; i < ss.r; i++)
 		{
 			for (int j = 0; j < ss.c; j++)
@@ -232,20 +256,18 @@ public:
 			}
 		}
 		input.rotate();
-		net dw = ss * input;
+		Matrix dw = ss * input;
 		w = w - dw;
 
 	}
-	double getE(net& goal) {
+	double getE(Matrix& goal) {
 		double sum=0;
 		for (int i = 0; i < e.r; i++)
 		{
 			for (int j = 0; j < e.c; j++)
 			{
 				double t = (this->output.n[i][j] - goal.n[i][j]);
-				this->e.n[i][j] = 0.5*t*t;
-				if (t < 0)
-					this->e.n[i][j] = -this->e.n[i][j];
+				this->e.n[i][j] = t;
 				sum += fabs(e.n[i][j]);
 
 			}
@@ -253,8 +275,56 @@ public:
 		return sum;
 	
 	}
+	Matrix E_back(void) {
+		Matrix bw=this->w;
+		bw.rotate();
+		return bw * e;
+
+	}
+	void setE(Matrix& E) {
+		this->e = E;
+	}
 	~layer() {
 
+	}
+};
+
+class network
+{
+public:
+	int lay;
+	std::vector<layer> netw;
+	network(int*num,int s) {
+		for (int i = 0; i < s-1; i++) {
+			netw.emplace_back(num[i + 1], num[i]);
+		}
+	}
+	Matrix output(Matrix& in) {
+		Matrix t;
+		t = in;
+		for (int i = 0; i < netw.size(); i++)
+		{
+			t = netw[i].oput(t);
+		}
+		return t;
+	}
+	Matrix train(Matrix& goal) {
+		Matrix t;
+		netw[netw.size() - 1].getE(goal);
+		for (int i = netw.size() - 1; i >=1; i--)
+		{
+			t = netw[i].E_back();
+			netw[i - 1].setE(t);
+		}
+		for (int i = 0; i < netw.size(); i++)
+		{
+			//netw[i].updata();
+			
+			std::thread t(&layer::updata, &netw[i]);
+			t.join();
+			
+		}
+		return netw[netw.size() - 1].e;
 	}
 };
 
@@ -262,22 +332,42 @@ public:
 int main(void) {
 
 	using namespace std;
-	layer a(3, 3);
-	net g(3, 1);
-	g.n[0][0] = 0.8;
-	g.n[1][0] = 0.2;
-	g.n[2][0] = 0.5;
-	net in(3, 1);
-	in.n[0][0] = 0.6;
-	in.n[1][0] = 0.3;
-	in.n[2][0] = 0.1;
+	layer a(2, 3);
+	layer b(3, 2);
+	layer c(3, 3);
+	Matrix g(3, 1);
+	Matrix in(3, 1);
+	Matrix t;
+	int ne[6] = { 3,3,3,3,3,3 };
+	network v(ne, 6);
+	for (int i = 0; i < 600; i++)
+	{
+		t = in;
+		v.output(in);
+		cout<<v.train(g)<<endl;
 
-	for (int i = 0; i < 500; i++) {
-		a.oput(in);
-		a.getE(g);
-		a.updata();
-		cout << a.e<<endl;
+		//
+		////cout << t  << endl;
+		//t = a.oput(t);
+		//t = b.oput(t);
+		//t = c.oput(t);
+		//c.getE(g);
+		//t = c.E_back();
+		//b.setE(t);
+		//t = b.E_back();
+		//a.setE(t);
+		//c.updata();
+		//b.updata();
+		//a.updata();
+		////cout << a.w << endl;
+		////cout << b.w << endl;
+		////cout << c.w << endl;
+		//cout << c.e << endl;
+		////cout << "output:" << endl;
+		////cout << c.output << endl;
+
 	}
 
+	
 	return 0;
 }
